@@ -1,10 +1,11 @@
-
+using ImageMagick
+using Images
 using CUDAnative
 using CUDAdrv
 using CuArrays
 
 using GtkReactive, Gtk.ShortNames
-using PerceptualColourMaps, Colors
+using Colors
 
 function mandelbrot_seq(c, maxiter)
     res::Array{Complex{Float64}, 1} = []
@@ -13,25 +14,34 @@ function mandelbrot_seq(c, maxiter)
     push!(res, 0)
     while count < maxiter && abs(z) < 14000000
         count = count + 1
-        z = z^2 + c
+        z *= z
+        z += c
         push!(res, z)
         
     end
+    println("count", count)
     return res
 end
 
-function seq_search(c, radius, maxiter)
-    seq = mandelbrot_seq(c, maxiter)
-    new_center = 0
-    for x in 1:30
-        temp_center = radius * ((rand() - .5) * 2 + (rand() - .5) * 2im)
-        temp_seq = mandelbrot_seq(temp_center + c, maxiter)
-        if length(temp_seq) > length(seq)
-            new_center = temp_center
-            seq= temp_seq
-        end
-    end
-    return seq, new_center
+function seq_search(c, radius, maxiter, seq_search_iters)
+    
+    x = mandelbrot_cu(c, radius * .66,
+        maxiter, value(bitsig), 128, seq_search_iters)
+    y = x .!= maximum(x)
+
+    y = feature_transform(y)
+    y = distance_transform(y)
+    y = y ./ maximum(y)
+
+    dc = range(-radius * .66, radius * .66, length=128)
+    dc = dc .+ im .* dc'
+
+    new_center = dc[argmax(y)]
+    
+    
+    new_seq = mandelbrot_seq(new_center + c, maxiter)
+       
+    return new_seq, new_center
 end
 
 function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
@@ -45,7 +55,7 @@ function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
     
     @inbounds delta_z = 0 * z_seq[1]
     @inbounds z_n = 0 * z_seq[1]
-    while count < maxiter && count < l - 1 && abs(delta_z + z_seq[count + 1]) < 18
+    while count < maxiter && count < l - 4 && abs(delta_z + z_seq[count + 1]) < 18
         count = count + 1
         @inbounds z_n = z_seq[count]
         delta_z = 2 * z_n * delta_z + delta_z^2 + delta_c
@@ -56,16 +66,23 @@ function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
     return 
 end
 
-ctx = CuContext(CuDevice(0))
+const ctx = CuContext(CuDevice(0))
 
-res = 1024
+const res = 512
 
-function mandelbrot_cu(center, radius, maxiter, bit64)   
+
+function mandelbrot_cu(center, radius, maxiter, bit64, res=res, seq_search_iters=3)   
     
     c = range(-radius, radius, length=res)
     c = c .+ im .* c'
     
-    seq, new_center = seq_search(center, radius, maxiter)
+    if seq_search_iters != 0
+        seq, new_center = seq_search(center, radius, maxiter, 
+            seq_search_iters - 1)
+    else
+        seq = mandelbrot_seq(center, maxiter)
+        new_center = 0
+    end
     
     c = c .- new_center
     if bit64
@@ -84,14 +101,13 @@ function mandelbrot_cu(center, radius, maxiter, bit64)
         synchronize(ctx)
         out = collect(device_out)
     end
-    
     return out
 end
 
 centersig = Signal(Complex{Base.MPFR.BigFloat}(0. + 0.0im))
 radiussig = Signal(2.)
 itersig = Signal(10000)
-bitsig = checkbox(;label="64 bit")
+bitsig = checkbox(;label="64 bit residuals")
 
 bothsig = map(centersig, radiussig, itersig, bitsig) do center, radius, iter, bit64
     center, radius, iter, bit64
@@ -101,21 +117,21 @@ function normalize(v)
     return (v .- minimum(v)) ./ (maximum(v) - minimum(v) + .01)
 end
 
-imgsig = map(droprepeats(sampleon(every(0.05), bothsig))) do both
+imgsig = map(droprepeats(sampleon(every(0.02), bothsig))) do both
     center, radius, iter, bit64 = both
     out = mandelbrot_cu(center, radius, iter, bit64)
     
-    out = out .% maximum(out)
+    out = out .% (iter - 1)
     
-    out = out .% 500
+    #out = out .% 500
     #out = log.(out)
     
-    return normalize(out)
+    #return normalize(out)
     
-    #return RGB.(normalize(out .% 640), normalize(out .% 800), normalize(out .% 1000))
+    return RGB.(normalize(out .% 6400), normalize(out .% 8000), normalize(out .% 10000))
     
-    color = applycolormap(mandelbrot_cu(center, radius, iter), cmap("L4"))
-    return RGB.(color[:,:,1], color[:,:,2], color[:, :, 3])
+    #color = applycolormap(mandelbrot_cu(center, radius, iter, bit64), cmap("L4"))
+    #return RGB.(color[:,:,1], color[:,:,2], color[:, :, 3])
 end
 
 c = canvas(UserUnit, res, res)
@@ -143,6 +159,8 @@ zr = button("Zoom Reset")
 zru = map(zr) do val
     push!(centersig, 0)
     push!(radiussig, 2)
+    push!(bitsig, false)
+    push!(itersig, 10000)
 end
 push!(vbox, zr)
 
@@ -174,5 +192,6 @@ signal_connect(win, :destroy) do widget
     Gtk.gtk_quit()
 end
 Gtk.gtk_main()
+destroy!(ctx)
 
 
