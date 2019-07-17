@@ -3,9 +3,12 @@ using Images
 using CUDAnative
 using CUDAdrv
 using CuArrays
+using FFTW
 
 using GtkReactive, Gtk.ShortNames
 using Colors
+
+using Profile
 
 function mandelbrot_seq(c, maxiter)
     res::Array{Complex{Float64}, 1} = []
@@ -19,7 +22,7 @@ function mandelbrot_seq(c, maxiter)
         push!(res, z)
         
     end
-    println("count", count)
+    #println("count", count)
     return res
 end
 
@@ -68,10 +71,8 @@ end
 
 const ctx = CuContext(CuDevice(0))
 
-const res = 512
 
-
-function mandelbrot_cu(center, radius, maxiter, bit64, res=res, seq_search_iters=3)   
+function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iters=2)   
     
     c = range(-radius, radius, length=res)
     c = c .+ im .* c'
@@ -108,33 +109,38 @@ centersig = Signal(Complex{Base.MPFR.BigFloat}(0. + 0.0im))
 radiussig = Signal(2.)
 itersig = Signal(10000)
 bitsig = checkbox(;label="64 bit residuals")
+ressig = dropdown(("1024", "512", "256"))
+resintsig = map(ressig) do val
+    parse(Int64, val)
+end
 
-bothsig = map(centersig, radiussig, itersig, bitsig) do center, radius, iter, bit64
-    center, radius, iter, bit64
+bothsig = map(centersig, radiussig, itersig, bitsig, resintsig) do center, radius, iter, bit64, res
+    center, radius, iter, bit64, res
 end
 
 function normalize(v)
+    v = sin.(v)
     return (v .- minimum(v)) ./ (maximum(v) - minimum(v) + .01)
 end
 
 imgsig = map(droprepeats(sampleon(every(0.02), bothsig))) do both
-    center, radius, iter, bit64 = both
-    out = mandelbrot_cu(center, radius, iter, bit64)
+    center, radius, iter, bit64, res = both
+    out = mandelbrot_cu(center, radius, iter, bit64, res)
     
-    out = out .% (iter - 1)
+    out = out .% (iter - 6)
     
     #out = out .% 500
     #out = log.(out)
     
     #return normalize(out)
     
-    return RGB.(normalize(out .% 6400), normalize(out .% 8000), normalize(out .% 10000))
+    return RGB.(normalize(out ./ 6400), normalize(out ./ 8000), normalize(out ./ 10000))
     
     #color = applycolormap(mandelbrot_cu(center, radius, iter, bit64), cmap("L4"))
     #return RGB.(color[:,:,1], color[:,:,2], color[:, :, 3])
 end
 
-c = canvas(UserUnit, res, res)
+c = canvas(UserUnit, 1024, 1024)
 win = Window(c)
 
 auxwin = Window("Controls")
@@ -148,19 +154,57 @@ adjiters = map(n) do val
     push!(itersig, 10^val)
 end
 push!(hbox, n)
+
+
 push!(vbox, hbox)
 zo = button("Zoom Out")
 zou = map(zo) do val
     push!(radiussig, value(radiussig) * 6)
 end
 push!(vbox, zo)
+
+zi = button("Zoom In")
+ziu = map(zi) do val
+    # zoom in using phase correlation
+    x = convert(Array{Float64}, Gray.(value(imgsig)))
+    norm(v) = (v .- minimum(v)) ./ (maximum(v) - minimum(v))
+
+    xp = fft(x[1:4:end, 1:4:end])
+    yp = fft(x[end:-4:1, end:-4:1])
+
+    temp = xp .* conj(yp)
+
+    correlation = abs.(ifft(temp ./ abs.(temp)))
+
+    c = range(0, 2 * value(radiussig), length=Integer(value(resintsig)/4))
+    c = c .+ im .* c'
+
+    offset = c[argmax(correlation)]
+
+    if real(offset) > value(radiussig)
+        offset -= 2 * value(radiussig)
+    end
+    if imag(offset) > value(radiussig)
+        offset -= 2im * value(radiussig)
+    end
+    push!(centersig, value(centersig) + offset / 2)
+    push!(radiussig, value(radiussig) / 4)
+end
+push!(vbox, zi)
+    
+hbox2 = Box(:h)
+l2 = Label("resolution")
+push!(hbox2, l2)
+push!(hbox2, ressig)
+push!(vbox, hbox2)
+
 push!(vbox, bitsig)
 zr = button("Zoom Reset")
 zru = map(zr) do val
     push!(centersig, 0)
     push!(radiussig, 2)
     push!(bitsig, false)
-    push!(itersig, 10000)
+    push!(n, 3)
 end
 push!(vbox, zr)
 
@@ -168,14 +212,14 @@ redraw = draw(c, imgsig) do cnvs, image
     copy!(cnvs, image)
 end
 
-hres = res / 2
+hres = 1024 / 2
 clicksig = map(c.mouse.buttonpress) do btn
     offset = value(radiussig) * (
         ((btn.position.x - hres) / hres) * im + ((btn.position.y - hres) / hres)
     )
     push!(centersig, value(centersig) + offset)
     push!(radiussig, value(radiussig) / 6)
-    println(value(radiussig))
+    #println(value(radiussig))
 end
 
 push!(centersig, 0)
@@ -191,7 +235,7 @@ Gtk.showall(auxwin)
 signal_connect(win, :destroy) do widget
     Gtk.gtk_quit()
 end
-Gtk.gtk_main()
-destroy!(ctx)
+#Gtk.gtk_main()
+#destroy!(ctx)
 
 
