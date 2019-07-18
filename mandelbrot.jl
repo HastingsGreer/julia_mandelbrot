@@ -41,7 +41,6 @@ function seq_search(c, radius, maxiter, seq_search_iters)
 
     new_center = dc[argmax(y)]
     
-    
     new_seq = mandelbrot_seq(new_center + c, maxiter)
        
     return new_seq, new_center
@@ -70,7 +69,6 @@ function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
 end
 
 const ctx = CuContext(CuDevice(0))
-
 
 function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iters=2)   
     
@@ -163,20 +161,27 @@ zou = map(zo) do val
 end
 push!(vbox, zo)
 
+keep_zooming = checkbox(;label="keep zooming")
 zi = button("Zoom In")
+zooming_loopback = Signal(0.0)
+zl2 = map(droprepeats(sampleon(every(.03), zooming_loopback))) do val
+    push!(zi, value(zi))
+end
+
+
 ziu = map(zi) do val
     # zoom in using phase correlation
     x = convert(Array{Float64}, Gray.(value(imgsig)))
     norm(v) = (v .- minimum(v)) ./ (maximum(v) - minimum(v))
 
-    xp = fft(x[1:4:end, 1:4:end])
-    yp = fft(x[end:-4:1, end:-4:1])
+    xp = fft(x[1:end, 1:end])
+    yp = fft(x[end:-1:1, end:-1:1])
 
     temp = xp .* conj(yp)
 
     correlation = abs.(ifft(temp ./ abs.(temp)))
 
-    c = range(0, 2 * value(radiussig), length=Integer(value(resintsig)/4))
+    c = range(0, 2 * value(radiussig), length=Integer(value(resintsig)))
     c = c .+ im .* c'
 
     offset = c[argmax(correlation)]
@@ -187,10 +192,20 @@ ziu = map(zi) do val
     if imag(offset) > value(radiussig)
         offset -= 2im * value(radiussig)
     end
-    push!(centersig, value(centersig) + offset / 2)
-    push!(radiussig, value(radiussig) / 4)
+    if(maximum(x) != minimum(x))
+        push!(centersig, value(centersig) + offset / 2)
+        push!(radiussig, value(radiussig) / 6)
+        if(value(keep_zooming))
+        
+            
+            push!(zooming_loopback, rand())
+        end
+    end
 end
 push!(vbox, zi)
+
+
+push!(vbox, keep_zooming)
     
 hbox2 = Box(:h)
 l2 = Label("resolution")
@@ -237,5 +252,5 @@ signal_connect(win, :destroy) do widget
 end
 #Gtk.gtk_main()
 #destroy!(ctx)
-
+Base.MPFR.setprecision(2048)
 
