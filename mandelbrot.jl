@@ -20,15 +20,43 @@ function mandelbrot_seq(c, maxiter)
         z *= z
         z += c
         push!(res, z)
+        count = count + 1
+        z *= z
+        z += c
+        push!(res, z)
+        count = count + 1
+        z *= z
+        z += c
+        push!(res, z)
+        count = count + 1
+        z *= z
+        z += c
+        push!(res, z)
+        count = count + 1
+        z *= z
+        z += c
+        push!(res, z)
+        count = count + 1
+        z *= z
+        z += c
+        push!(res, z)
+        count = count + 1
+        z *= z
+        z += c
+        push!(res, z)
+        count = count + 1
+        z *= z
+        z += c
+        push!(res, z)
         
     end
-    #println("count", count)
+    println("count", count)
     return res
 end
 
 function seq_search(c, radius, maxiter, seq_search_iters)
     
-    x = mandelbrot_cu(c, radius * .66,
+    x = mandelbrot_cu(c, radius,
         maxiter, value(bitsig), 128, seq_search_iters)
     y = x .!= maximum(x)
 
@@ -36,7 +64,7 @@ function seq_search(c, radius, maxiter, seq_search_iters)
     y = distance_transform(y)
     y = y ./ maximum(y)
 
-    dc = range(-radius * .66, radius * .66, length=128)
+    dc = range(-radius, radius, length=128)
     dc = dc .+ im .* dc'
 
     new_center = dc[argmax(y)]
@@ -61,6 +89,18 @@ function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
         count = count + 1
         @inbounds z_n = z_seq[count]
         delta_z = 2 * z_n * delta_z + delta_z^2 + delta_c
+        count = count + 1
+        @inbounds z_n = z_seq[count]
+        delta_z = 2 * z_n * delta_z + delta_z^2 + delta_c
+        count = count + 1
+        @inbounds z_n = z_seq[count]
+        delta_z = 2 * z_n * delta_z + delta_z^2 + delta_c
+        count = count + 1
+        @inbounds z_n = z_seq[count]
+        delta_z = 2 * z_n * delta_z + delta_z^2 + delta_c
+        count = count + 1
+        @inbounds z_n = z_seq[count]
+        delta_z = 2 * z_n * delta_z + delta_z^2 + delta_c
     end
     
     @inbounds out_array[i] = count
@@ -70,7 +110,7 @@ end
 
 const ctx = CuContext(CuDevice(0))
 
-function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iters=2)   
+function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iters=3)   
     
     c = range(-radius, radius, length=res)
     c = c .+ im .* c'
@@ -139,11 +179,16 @@ imgsig = map(droprepeats(sampleon(every(0.02), bothsig))) do both
 end
 
 c = canvas(UserUnit, 1024, 1024)
-win = Window(c)
+#win = Window(c)
 
 auxwin = Window("Controls")
+
+big_hbox = Box(:h)
+push!(big_hbox, c)
+push!(auxwin, big_hbox)
+
 vbox = Box(:v)
-push!(auxwin, vbox)
+push!(big_hbox, vbox)
 hbox = Box(:h)
 l = Label("Log Iters")
 push!(hbox, l)
@@ -164,8 +209,10 @@ push!(vbox, zo)
 keep_zooming = checkbox(;label="keep zooming")
 zi = button("Zoom In")
 zooming_loopback = Signal(0.0)
-zl2 = map(droprepeats(sampleon(every(.03), zooming_loopback))) do val
-    push!(zi, value(zi))
+zl2 = map(droprepeats(sampleon(every(.3), zooming_loopback))) do val
+    if(value(keep_zooming))
+        push!(zi, value(zi))
+    end
 end
 
 
@@ -223,6 +270,9 @@ zru = map(zr) do val
 end
 push!(vbox, zr)
 
+iters_hbox = Box(:h)
+
+
 redraw = draw(c, imgsig) do cnvs, image
     copy!(cnvs, image)
 end
@@ -240,16 +290,11 @@ end
 push!(centersig, 0)
 push!(radiussig, 2)
 
-signal_connect(win, :destroy) do w
-    destroy(auxwin)
-end
 
-Gtk.showall(win)
+
 Gtk.showall(auxwin)
 
-signal_connect(win, :destroy) do widget
-    Gtk.gtk_quit()
-end
+
 #Gtk.gtk_main()
 #destroy!(ctx)
 Base.MPFR.setprecision(2048)
