@@ -250,7 +250,9 @@ Gtk.showall(auxwin)
 signal_connect(win, :destroy) do widget
     Gtk.gtk_quit()
 end
-#Gtk.gtk_main()
-#destroy!(ctx)
+
 Base.MPFR.setprecision(2048)
+Gtk.gtk_main()
+destroy!(ctx)
+
 
