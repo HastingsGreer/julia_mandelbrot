@@ -19,7 +19,7 @@ begin
 	#Pkg.add("ImageMagick")
 	#Pkg.add("Images")
 	#Pkg.add("Colors")
-	Pkg.add("BenchmarkTools")
+	#Pkg.add("BenchmarkTools")
 end
 
 # ╔═╡ 9d9e5df3-1aa4-498b-9146-cc740d0b7fd7
@@ -37,20 +37,33 @@ end
 # ╔═╡ e6701b93-3804-455b-a7bf-9b581751431a
 using Plots
 
+# ╔═╡ 158eee6b-44de-412e-a5df-5749e18777c3
+begin
+	struct IndexPair
+		top::Int64
+		left::Int64
+		bottom::Int64
+		right::Int64
+	end
+	function topleft(ind::IndexPair)
+		return CartesianIndex(int.top, ind.left)
+	end
+end
+
 # ╔═╡ bdebed31-102a-4031-998a-45d1372aafa7
 md"""
 maxiter
-$(@bind maxiter Slider(1:100000))
+$(@bind maxiter Slider(1:300000))
 """
 
 # ╔═╡ 0b514d03-264f-4d41-91b5-05f61fae5306
 function moveSeries(coefficients, q)
-	out::typeof(coefficients) = [0, 0, 0, 0]
-	out[4] = coefficients[4]
-	out[3] = coefficients[3] + 3 * out[4] * q
-	out[2] = coefficients[2] + 2 * out[3] * q - 3 * out[4] * q^2
-	out[1] = coefficients[1] +     out[2] * q -     out[3] * q^2 + out[4] * q^3
-	return out
+	
+	a4 = coefficients[4]
+	a3 = coefficients[3] + 3 * a4 * q
+	a2 = coefficients[2] + 2 * a3 * q - 3 * a4 * q^2
+	a1 = coefficients[1] +     a2 * q -     a3 * q^2 + a4 * q^3
+	return (a1, a2, a3, a4)
 end
 
 # ╔═╡ becc593b-7451-47bb-b8c2-f0f3d41053fb
@@ -89,6 +102,14 @@ begin
 	size(fourCorners(CartesianIndices(x))[1]) == (2, 2)
 end
 
+# ╔═╡ d19507d5-4ee4-456b-bb15-a2dff9e2c3ab
+begin
+	qq = [1 1; 3 4]
+	ind = CartesianIndices(qq)
+	fc = fourCorners(ind)
+	ind
+end
+
 # ╔═╡ f5756d28-ebc3-45bb-8202-0ca98c016578
 begin
 	function series_iterate(coefficients, center, maxdel, maxiters)
@@ -99,8 +120,8 @@ begin
 		imaxdel = im * maxdel
 		inititers = 0
 		while true
-			abs(1000 * D * maxdel^3) <= abs(A + B * maxdel + C * maxdel^2) || break
-			abs(1000 * D * imaxdel^3) <= abs(A + B * imaxdel + C * imaxdel^2) || break
+			abs2(1000 * D * maxdel^3) <= abs2(A + B * maxdel + C * maxdel^2) || break
+			abs2(1000 * D * imaxdel^3) <= abs2(A + B * imaxdel + C * imaxdel^2) || break
 			inititers < maxiters || break
 			An = A^2 + center
 			Bn = 2 * A * B + 1
@@ -111,13 +132,13 @@ begin
 			
 			inititers += 1
 		end
-		return [A, B, C, D], inititers
+		return (A, B, C, D), inititers
 	end
 	function mandelbrot(center, radius, maxiters, res=1024)
 		delta_arr = range(-radius, radius, length=res)
 		delta_arr = delta_arr .+ im .* delta_arr' 
 		
-		coefficients::Array{Complex{Float64}, 1} = [0, 0, 0, 0]
+		coefficients = (0im, 0im, 0im, 0im)
 		
 		maxdel = maximum(abs.(delta_arr)) * 5
 				
@@ -142,10 +163,10 @@ begin
 		end
 		return out, inititers
 	end
-	function outer_recursive_mandelbrot(center, radius, max_iters, res=1024)
-		delta_arr = range(-radius, radius, length=res)
-		delta_arr = delta_arr .+ im .* delta_arr' 
-		c_arr = delta_arr .+ center
+	function outer_recursive_mandelbrot(center_, radius, max_iters, res=1024)
+		delta_arr_ax = range(-radius, radius, length=res)
+		delta_arr = delta_arr_ax .+ im .* delta_arr_ax' 
+		c_arr = delta_arr .+ center_
 		coefficients::Array{Complex{Float64}, 1} = [0, 0, 0, 0]
 		
 		indices = CartesianIndices(c_arr)
@@ -153,34 +174,39 @@ begin
 		output_arr = zeros(Int64, size(c_arr))
 		
 		recursive_mandelbrot(
-			indices, coefficients, center, c_arr, output_arr, 0, max_iters
+			indices, coefficients, center_, c_arr, output_arr, 0, max_iters
 		)
 		return output_arr, 1
+	end
+	function inner_loop(max_iters, init_iters, z, center_)
+		count = init_iters
+		while count < max_iters && abs2(z) < 100
+			for dummy = 1:4
+				count = count + 1
+				z *= z
+				z += center_
+			end
+		end
+		return count
 	end
 	function recursive_mandelbrot(
 			indices, coefficients, prev_center, c_arr, output_arr, init_iters, max_iters
 		)
 		
-		center = (c_arr[indices[1]] + c_arr[indices[end]]) / 2
-		coefficients = moveSeries(coefficients, center - prev_center)
+		@inbounds center_ = (c_arr[indices[1]] + c_arr[indices[end]]) / 2
+		coefficients = moveSeries(coefficients, center_ - prev_center)
 		
 		if size(indices) == (1, 1)
-			count = init_iters
-			z = coefficients[1]
-			while count < max_iters && abs(z) < 10
-				for dummy = 1:4
-					count = count + 1
-					z *= z
-					z += center
-				end
-			end
-			output_arr[indices[1]] = count
+			count = inner_loop(max_iters, init_iters, coefficients[1], center_)
+			
+			#count -= init_iters
+			@inbounds output_arr[indices[1]] = count
 		else
-			maxdel = abs(c_arr[indices[1]] - c_arr[indices[end]]) / 2
-			coefficients, more_iters = series_iterate(coefficients, center, maxdel, max_iters - init_iters)
+			@inbounds maxdel = abs(c_arr[indices[1]] - c_arr[indices[end]]) / 2
+			coefficients, more_iters = series_iterate(coefficients, center_, maxdel, max_iters - init_iters)
 			init_iters += more_iters
 			for sub_indices = fourCorners(indices)
-				recursive_mandelbrot(sub_indices, coefficients, center, c_arr, output_arr, init_iters, max_iters)
+				recursive_mandelbrot(sub_indices, coefficients, center_, c_arr, output_arr, init_iters, max_iters)
 			end
 		end
 	end	
@@ -194,7 +220,7 @@ begin
 		Complex{Float64}(d["center"]), 
 		d["radius"], 
 		maxiter, 
-		16 * 64
+		8 * 64
 	)
 	miniters = minimum(out)
 	maxiters = maximum(out)
@@ -204,7 +230,7 @@ begin
 end
 
 # ╔═╡ f1780d86-a0c4-4749-b067-793fd6574c56
-begin
+"""begin
 	Profile.clear()
 	@Profile.profile outer_recursive_mandelbrot(
 		Complex{Float64}(d["center"]), 
@@ -218,16 +244,33 @@ end
 Profile.print()
 
 # ╔═╡ 7bfbec42-e5cc-4537-8c74-01fbc16f5d0e
-@btime outer_recursive_mandelbrot(
-		Complex{Float64}(d["center"]), 
-		d["radius"], 
-		maxiter, 
-		16 * 64
+begin
+	center_ = Complex{Float64}(d["center"])
+	radius = d["radius"]
+	max_iters = maxiter
+	res = 256
+	println(stderr, "===============================================================")
+	
+	delta_arr_ax = range(-radius, radius, length=res)
+	delta_arr = delta_arr_ax .+ im .* delta_arr_ax' 
+	c_arr = delta_arr .+ center_
+	zero = 0 + 0 * im
+	coefficients= (zero, zero, zero, zero)
+
+	indices = CartesianIndices(c_arr)
+
+	output_arr = zeros(Int64, size(c_arr))
+
+	@code_native recursive_mandelbrot(
+		indices, coefficients, center_, c_arr, output_arr, 0, max_iters
 	)
+end
 
 # ╔═╡ Cell order:
 # ╠═33c00f16-714e-4c2e-8631-c5c0d2bb38ab
 # ╠═9d9e5df3-1aa4-498b-9146-cc740d0b7fd7
+# ╠═158eee6b-44de-412e-a5df-5749e18777c3
+# ╠═d19507d5-4ee4-456b-bb15-a2dff9e2c3ab
 # ╠═f5756d28-ebc3-45bb-8202-0ca98c016578
 # ╠═bdebed31-102a-4031-998a-45d1372aafa7
 # ╠═da0b3816-e929-4454-8f1b-8d334d3ae93a
