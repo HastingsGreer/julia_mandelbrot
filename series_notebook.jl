@@ -20,6 +20,7 @@ begin
 	#Pkg.add("Images")
 	#Pkg.add("Colors")
 	#Pkg.add("BenchmarkTools")
+	#Pkg.add("GR")
 end
 
 # ╔═╡ 9d9e5df3-1aa4-498b-9146-cc740d0b7fd7
@@ -34,26 +35,10 @@ begin
 	using BenchmarkTools
 end
 
-# ╔═╡ e6701b93-3804-455b-a7bf-9b581751431a
-using Plots
-
-# ╔═╡ 158eee6b-44de-412e-a5df-5749e18777c3
-begin
-	struct IndexPair
-		top::Int64
-		left::Int64
-		bottom::Int64
-		right::Int64
-	end
-	function topleft(ind::IndexPair)
-		return CartesianIndex(int.top, ind.left)
-	end
-end
-
 # ╔═╡ bdebed31-102a-4031-998a-45d1372aafa7
 md"""
 maxiter
-$(@bind maxiter Slider(1:300000))
+$(@bind maxiter Slider(1:30000))
 """
 
 # ╔═╡ 0b514d03-264f-4d41-91b5-05f61fae5306
@@ -89,25 +74,29 @@ end
 
 # ╔═╡ a500ce76-7a56-47a9-a755-9723362a4b22
 begin
-	function fourCorners(array)
-		return (
-			array[1:end ÷ 2, 1:end ÷ 2],
-			array[1:end ÷ 2, end ÷ 2 + 1:end],
-			array[end ÷ 2 + 1:end, 1:end ÷ 2],
-			array[end ÷ 2 + 1:end, end ÷ 2 + 1:end],
-			
+	function ConstructIndices(topleft, bottomright)
+		return CartesianIndices(
+			(topleft[1]:bottomright[1], topleft[2]:bottomright[2])
 		)
 	end
+	function fourCorners(array)
+		@inbounds out = (
+			(array[1, 1], array[end ÷ 2, end ÷ 2]),
+			(array[1, end ÷ 2 + 1], array[end ÷ 2, end]),
+			(array[end ÷ 2 + 1, 1], array[end, end ÷ 2]),
+			(array[end ÷ 2 + 1, end ÷ 2 + 1],array[ end, end]),
+			
+		)
+		return map(out) do elem
+			ConstructIndices(elem[1], elem[end])
+		end
+	end
 	x = [1 2 3 4; 5 6 7 8; 9 10 11 12; 13 14 15 16]
-	size(fourCorners(CartesianIndices(x))[1]) == (2, 2)
-end
-
-# ╔═╡ d19507d5-4ee4-456b-bb15-a2dff9e2c3ab
-begin
-	qq = [1 1; 3 4]
-	ind = CartesianIndices(qq)
-	fc = fourCorners(ind)
-	ind
+	
+	ind = CartesianIndices(x)
+	print("================================")
+	item = @code_native fourCorners(ind)
+	
 end
 
 # ╔═╡ f5756d28-ebc3-45bb-8202-0ca98c016578
@@ -120,13 +109,16 @@ begin
 		imaxdel = im * maxdel
 		inititers = 0
 		while true
-			abs2(1000 * D * maxdel^3) <= abs2(A + B * maxdel + C * maxdel^2) || break
-			abs2(1000 * D * imaxdel^3) <= abs2(A + B * imaxdel + C * imaxdel^2) || break
+			
 			inititers < maxiters || break
 			An = A^2 + center
 			Bn = 2 * A * B + 1
 			Cn = 2 * A * C + B^2
 			Dn  = 2 * A * D + 2 * B * C
+			
+			abs2(1000 * Dn * maxdel^3) <= abs2(An + Bn * maxdel + Cn * maxdel^2) || break
+			abs2(1000 * Dn * imaxdel^3) <= abs2(An + Bn * imaxdel + Cn * imaxdel^2) || break
+			
 			A, B, C, D = An, Bn, Cn, Dn
 			
 			
@@ -140,9 +132,10 @@ begin
 		
 		coefficients = (0im, 0im, 0im, 0im)
 		
-		maxdel = maximum(abs.(delta_arr)) * 5
+		maxdel = maximum(abs.(delta_arr))
 				
 		coefficients, inititers = series_iterate(coefficients, center, maxdel, maxiters)
+		#inititers = 0
 		A, B, C, D = coefficients
 		
 		z_init = A .+ B .* delta_arr .+ C .* delta_arr .^ 2 + D * delta_arr .^ 3
@@ -180,7 +173,8 @@ begin
 	end
 	function inner_loop(max_iters, init_iters, z, center_)
 		count = init_iters
-		while count < max_iters && abs2(z) < 100
+		#return count
+		while count < max_iters && abs2(z) < 10
 			for dummy = 1:4
 				count = count + 1
 				z *= z
@@ -222,6 +216,7 @@ begin
 		maxiter, 
 		8 * 64
 	)
+	out = out .% 400
 	miniters = minimum(out)
 	maxiters = maximum(out)
 	out = out .- minimum(out)
@@ -269,12 +264,9 @@ end
 # ╔═╡ Cell order:
 # ╠═33c00f16-714e-4c2e-8631-c5c0d2bb38ab
 # ╠═9d9e5df3-1aa4-498b-9146-cc740d0b7fd7
-# ╠═158eee6b-44de-412e-a5df-5749e18777c3
-# ╠═d19507d5-4ee4-456b-bb15-a2dff9e2c3ab
 # ╠═f5756d28-ebc3-45bb-8202-0ca98c016578
 # ╠═bdebed31-102a-4031-998a-45d1372aafa7
 # ╠═da0b3816-e929-4454-8f1b-8d334d3ae93a
-# ╠═e6701b93-3804-455b-a7bf-9b581751431a
 # ╠═0b514d03-264f-4d41-91b5-05f61fae5306
 # ╠═becc593b-7451-47bb-b8c2-f0f3d41053fb
 # ╠═309d467c-d441-43b3-a55c-166596a9d777
