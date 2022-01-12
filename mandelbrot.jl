@@ -15,7 +15,7 @@ function mandelbrot_seq(c, maxiter)
     count = 0
     z::typeof(c) = 0.0
     push!(res, 0)
-    while count < maxiter && abs(z) < 14000000
+    while count < maxiter && abs2(z) < 14000000
         count = count + 1
         z *= z
         z += c
@@ -85,7 +85,7 @@ function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
     
     @inbounds delta_z = 0 * z_seq[1]
     @inbounds z_n = 0 * z_seq[1]
-    while count < maxiter && count < l - 4 && abs(delta_z + z_seq[count + 1]) < 18
+    while count < maxiter && count < l - 4 && abs2(delta_z + z_seq[count + 1]) < 18
         count = count + 1
         @inbounds z_n = z_seq[count]
         delta_z = 2 * z_n * delta_z + delta_z^2 + delta_c
