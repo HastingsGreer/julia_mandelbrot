@@ -1,10 +1,8 @@
 using ImageMagick
 using Images
-using CUDAnative
-using CUDAdrv
-using CuArrays
+using CUDA
 using FFTW
-
+using JLD
 using GtkReactive, Gtk.ShortNames
 using Colors
 
@@ -48,14 +46,14 @@ function mandelbrot_seq(c, maxiter)
         z *= z
         z += c
         push!(res, z)
-        
+
     end
     println("count", count)
     return res
 end
 
 function seq_search(c, radius, maxiter, seq_search_iters)
-    
+
     x = mandelbrot_cu(c, radius,
         maxiter, value(bitsig), 128, seq_search_iters)
     y = x .!= maximum(x)
@@ -68,21 +66,21 @@ function seq_search(c, radius, maxiter, seq_search_iters)
     dc = dc .+ im .* dc'
 
     new_center = dc[argmax(y)]
-    
+
     new_seq = mandelbrot_seq(new_center + c, maxiter)
-       
+
     return new_seq, new_center
 end
 
 function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
     i = (blockIdx().x -1) * blockDim().x + threadIdx().x
-    
+
     @inbounds delta_c = delta_c_array[i]
-    
+
     count = 0
-    
+
     l = length(z_seq)
-    
+
     @inbounds delta_z = 0 * z_seq[1]
     @inbounds z_n = 0 * z_seq[1]
     while count < maxiter && count < l - 4 && abs2(delta_z + z_seq[count + 1]) < 18
@@ -102,27 +100,26 @@ function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
         @inbounds z_n = z_seq[count]
         delta_z = 2 * z_n * delta_z + delta_z^2 + delta_c
     end
-    
+
     @inbounds out_array[i] = count
-    
-    return 
+
+    return
 end
 
-const ctx = CuContext(CuDevice(0))
 
-function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iters=3)   
-    
+function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iters=3)
+
     c = range(-radius, radius, length=res)
     c = c .+ im .* c'
-    
+
     if seq_search_iters != 0
-        seq, new_center = seq_search(center, radius, maxiter, 
+        seq, new_center = seq_search(center, radius, maxiter,
             seq_search_iters - 1)
     else
         seq = mandelbrot_seq(center, maxiter)
         new_center = 0
     end
-    
+
     c = c .- new_center
     if bit64
         device_c = CuArray(Array{Complex{Float64}, 2}(c))
@@ -132,12 +129,12 @@ function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iter
         device_seq = CuArray(Array{Complex{Float32}, 1}(seq))
     end
     out::Array{Int64, 2} = zeros(res, res)
-    
+
     device_out = CuArray(out)
-    secs = CUDAdrv.@elapsed begin
+    secs = CUDA.@elapsed begin
 
         @cuda blocks=res threads=res mandelbrot_cu_kernel(device_c, device_seq, device_out, maxiter)
-        synchronize(ctx)
+        synchronize()
         out = collect(device_out)
     end
     return out
@@ -145,14 +142,17 @@ end
 
 centersig = Signal(Complex{Base.MPFR.BigFloat}(0. + 0.0im))
 radiussig = Signal(2.)
-itersig = Signal(10000)
+itersig = Signal(10)
 bitsig = checkbox(;label="64 bit residuals")
 ressig = dropdown(("1024", "512", "256"))
+
+colormap_scale = slider(1:100)
 resintsig = map(ressig) do val
     parse(Int64, val)
 end
 
 bothsig = map(centersig, radiussig, itersig, bitsig, resintsig) do center, radius, iter, bit64, res
+    save("last_location.jld", Dict("center" => center, "radius" => radius)) 
     center, radius, iter, bit64, res
 end
 
@@ -161,21 +161,22 @@ function normalize(v)
     return (v .- minimum(v)) ./ (maximum(v) - minimum(v) + .01)
 end
 
-imgsig = map(droprepeats(sampleon(every(0.02), bothsig))) do both
+imgsig_unmapped = map(droprepeats(sampleon(every(0.02), bothsig))) do both
     center, radius, iter, bit64, res = both
     out = mandelbrot_cu(center, radius, iter, bit64, res)
-    
+
     out = out .% (iter - 6)
-    
+
     #out = out .% 500
     #out = log.(out)
-    
+
     #return normalize(out)
-    
-    return RGB.(normalize(out ./ 6400), normalize(out ./ 8000), normalize(out ./ 10000))
-    
-    #color = applycolormap(mandelbrot_cu(center, radius, iter, bit64), cmap("L4"))
-    #return RGB.(color[:,:,1], color[:,:,2], color[:, :, 3])
+    return out
+end
+
+imgsig = map(imgsig_unmapped, colormap_scale) do out, colormap_scale
+    return RGB.(normalize(out ./ (64 * colormap_scale)), normalize(out ./ (80 * colormap_scale)), normalize(out ./ (100 * colormap_scale)))
+
 end
 
 c = canvas(UserUnit, 1024, 1024)
@@ -205,6 +206,12 @@ zou = map(zo) do val
     push!(radiussig, value(radiussig) * 6)
 end
 push!(vbox, zo)
+
+hbox = Box(:h)
+push!(hbox, Label("Colormap_scale"))
+push!(hbox, colormap_scale)
+push!(vbox, hbox)
+
 
 keep_zooming = checkbox(;label="keep zooming")
 zi = button("Zoom In")
@@ -243,8 +250,8 @@ ziu = map(zi) do val
         push!(centersig, value(centersig) + offset / 2)
         push!(radiussig, value(radiussig) / 6)
         if(value(keep_zooming))
-        
-            
+
+
             push!(zooming_loopback, rand())
         end
     end
@@ -253,7 +260,7 @@ push!(vbox, zi)
 
 
 push!(vbox, keep_zooming)
-    
+
 hbox2 = Box(:h)
 l2 = Label("resolution")
 push!(hbox2, l2)
@@ -269,6 +276,31 @@ zru = map(zr) do val
     push!(n, 3)
 end
 push!(vbox, zr)
+
+
+set_location_button = button("Set Location")
+push!(vbox, set_location_button)
+re_label = Label("re")
+push!(vbox, re_label)
+re_box = textbox(String)
+push!(vbox, re_box)
+im_label = Label("im")
+push!(vbox, im_label)
+im_box = textbox(String)
+push!(vbox, im_box)
+r_label = Label("r")
+push!(vbox, r_label)
+r_box = textbox(String)
+push!(vbox, r_box)
+
+set_location_keep = map(r_box, re_box, im_box) do val, val2, val3
+    println(value(r_box))
+    println("hi")
+    if value(r_box) != ""
+        push!(centersig, Base.MPFR.BigFloat(value(re_box)) + im * Base.MPFR.BigFloat(value(im_box)))
+        push!(radiussig, 1 / parse(Float64, value(r_box)))
+    end
+end
 
 iters_hbox = Box(:h)
 
@@ -295,7 +327,7 @@ push!(radiussig, 2)
 Gtk.showall(auxwin)
 
 Base.MPFR.setprecision(2048)
-Gtk.gtk_main()
-destroy!(ctx)
+#Gtk.gtk_main()
+#destroy!(ctx)
 
 

@@ -1,0 +1,10 @@
+[deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Colors = "5ae59095-9a9b-59fe-a467-6f913c188581"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+Gtk = "4c0ca9eb-093a-5379-98c5-f87ac0bbbf44"
+GtkReactive = "27996c0f-39cd-5cc1-a27a-05f136f946b6"
+ImageMagick = "6218d12a-5da1-5696-b52f-db25d2ecc6d1"
+Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+JLD = "4138dd39-2aa7-5051-a626-17a0bb65d9c8"
+Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
