@@ -52,25 +52,6 @@ function mandelbrot_seq(c, maxiter)
     return res
 end
 
-function seq_search(c, radius, maxiter, seq_search_iters)
-
-    x = mandelbrot_cu(c, radius,
-        maxiter, value(bitsig), 128, seq_search_iters)
-    y = x .!= maximum(x)
-
-    y = feature_transform(y)
-    y = distance_transform(y)
-    y = y ./ maximum(y)
-
-    dc = range(-radius, radius, length=128)
-    dc = dc .+ im .* dc'
-
-    new_center = dc[argmax(y)]
-
-    new_seq = mandelbrot_seq(new_center + c, maxiter)
-
-    return new_seq, new_center
-end
 
 function mandelbrot_cu_kernel(delta_c_array, z_seq, out_array, maxiter)
     i = (blockIdx().x -1) * blockDim().x + threadIdx().x
@@ -113,14 +94,37 @@ function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iter
     c = c .+ im .* c'
 
     if seq_search_iters != 0
-        seq, new_center = seq_search(center, radius, maxiter,
-            seq_search_iters - 1)
+        first_pass_counts, inner_seq, center_change = mandelbrot_cu(center, radius,
+            maxiter, value(bitsig), 128, seq_search_iters - 1)
+
+        if abs(maximum(first_pass_counts) - maxiter) < 4
+            if res == 128
+                return first_pass_counts, inner_seq, center_change
+            end
+        end
+
+
+        y = first_pass_counts .!= maximum(first_pass_counts)
+
+        y = feature_transform(y)
+        y = distance_transform(y)
+        #y = y ./ maximum(y)
+
+        println(maximum(y))
+
+        dcenter = range(-radius, radius, length=128)
+        dcenter = dcenter .+ im .* dcenter'
+
+        center_change = dcenter[argmax(y)]
+
+        seq = mandelbrot_seq(center + center_change, maxiter)
+
     else
         seq = mandelbrot_seq(center, maxiter)
-        new_center = 0
+        center_change = 0
     end
 
-    c = c .- new_center
+    c = c .- center_change
     if bit64
         device_c = CuArray(Array{Complex{Float64}, 2}(c))
         device_seq = CuArray(Array{Complex{Float64}, 1}(seq))
@@ -137,7 +141,7 @@ function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iter
         synchronize()
         out = collect(device_out)
     end
-    return out
+    return out, seq, center_change
 end
 
 centersig = Signal(Complex{Base.MPFR.BigFloat}(0. + 0.0im))
@@ -163,7 +167,7 @@ end
 
 imgsig_unmapped = map(droprepeats(sampleon(every(0.02), bothsig))) do both
     center, radius, iter, bit64, res = both
-    out = mandelbrot_cu(center, radius, iter, bit64, res)
+    out, seq, dc = mandelbrot_cu(center, radius, iter, bit64, res)
 
     out = out .% (iter - 6)
 
@@ -311,6 +315,7 @@ end
 
 hres = 1024 / 2
 clicksig = map(c.mouse.buttonpress) do btn
+    println("=====================================")
     offset = value(radiussig) * (
         ((btn.position.x - hres) / hres) * im + ((btn.position.y - hres) / hres)
     )
@@ -327,7 +332,7 @@ push!(radiussig, 2)
 Gtk.showall(auxwin)
 
 Base.MPFR.setprecision(2048)
-#Gtk.gtk_main()
+Gtk.gtk_main()
 #destroy!(ctx)
 
 
