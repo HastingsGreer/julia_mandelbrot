@@ -94,30 +94,31 @@ function mandelbrot_cu(center, radius, maxiter, bit64, res=1024, seq_search_iter
     c = c .+ im .* c'
 
     if seq_search_iters != 0
-        first_pass_counts, inner_seq, center_change = mandelbrot_cu(center, radius,
+        first_pass_counts, seq, center_change = mandelbrot_cu(center, radius,
             maxiter, value(bitsig), 128, seq_search_iters - 1)
 
         if abs(maximum(first_pass_counts) - maxiter) < 4
             if res == 128
-                return first_pass_counts, inner_seq, center_change
+                return first_pass_counts, seq, center_change
             end
+        else
+
+
+            y = first_pass_counts .!= maximum(first_pass_counts)
+
+            y = feature_transform(y)
+            y = distance_transform(y)
+            #y = y ./ maximum(y)
+
+            println(maximum(y))
+
+            dcenter = range(-radius, radius, length=128)
+            dcenter = dcenter .+ im .* dcenter'
+
+            center_change = dcenter[argmax(y)]
+
+            seq = mandelbrot_seq(center + center_change, maxiter)
         end
-
-
-        y = first_pass_counts .!= maximum(first_pass_counts)
-
-        y = feature_transform(y)
-        y = distance_transform(y)
-        #y = y ./ maximum(y)
-
-        println(maximum(y))
-
-        dcenter = range(-radius, radius, length=128)
-        dcenter = dcenter .+ im .* dcenter'
-
-        center_change = dcenter[argmax(y)]
-
-        seq = mandelbrot_seq(center + center_change, maxiter)
 
     else
         seq = mandelbrot_seq(center, maxiter)
